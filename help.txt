@@ -1,0 +1,12 @@
+https://la.mathworks.com/help/images/getting-started-with-image-segmentation.html
+
+app:
+
+https://la.mathworks.com/videos/image-segmentation-app-1504291389509.html
+
+
+
+https://la.mathworks.com/help/deeplearning/built-in-pretrained-networks.html?utm_source=chatgpt.com
+
+
+
