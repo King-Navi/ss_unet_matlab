@@ -1,9 +1,9 @@
 function extract_middle_mhd()
     % /home/ivan/Documents/SS/ProstateMR/Databases/Promise12/training_data
     % /home/ivan/Documents/SS/ProstateMR/Databases/Promise12/test_data
-    inputDir   = "/home/ivan/Documents/SS/ProstateMR/Databases/Promise12/test_data";   % carpeta con .mhd/.raw
-    outImgDir  = fullfile("data","ProstateMR", "test_data", "slices_img");
-    outMaskDir = fullfile("data","ProstateMR", "test_data", "slices_mask");
+    inputDir   = "/home/ivan/Documents/SS/ProstateMR/Databases/Promise12/training_data";   % carpeta con .mhd/.raw
+    outImgDir  = fullfile("data","ProstateMR", "training_data", "slices_img");
+    outMaskDir = fullfile("data","ProstateMR", "training_data", "slices_mask");
     if ~exist(outImgDir, 'dir'),  mkdir(outImgDir);  end
     if ~exist(outMaskDir, 'dir'), mkdir(outMaskDir); end
 

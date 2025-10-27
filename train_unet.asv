@@ -35,29 +35,19 @@ end
 totalImages = numel(imds.Files);
 assert(totalImages > 1, "Not enough paired samples.");
 
-%% split: ensure validation has positive cases
-% Semilla fija (reproducible)
+%% Stratified split: ensure validation has positive cases
 rng(123);
-% F = false(___,like=p) devuelve un arreglo de ceros lógicos de la misma dispersión que la variable lógica p
 hasPolyp = false(totalImages,1);
-%Detectar qué imágenes tienen pólipo
 for i = 1:totalImages
-    % reads the Ith image file from the datastore 
     L = readimage(pxds, i);
-    % matriz categórica (H×W) con categorías ["background","Polyp"]. L(:) convierte toda la matriz en un vector columna.
     hasPolyp(i) = any(L(:) == "Polyp");
 end
-
-% find te devuelve los índices
 posIdx = find(hasPolyp);
-% ~ es ! osea NOT
 negIdx = find(~hasPolyp);
 
 valFrac   = 0.30;
-% numel devuelve el número de elementos
 numValPos = max(1, round(valFrac * numel(posIdx)));
 numValNeg = max(1, round(valFrac * numel(negIdx)));
-
 valIdx = [randsample(posIdx, min(numValPos, numel(posIdx)), false); ...
           randsample(negIdx, min(numValNeg, numel(negIdx)), false)];
 valIdx = unique(valIdx);
@@ -180,9 +170,8 @@ function [imdsOut, pxdsOut, report] = alignByBasename(imdsIn, pxdsIn, strict)
     for i = 1:numel(imFiles)
         k = imKeys{i};
         if isKey(maskMap, k)
-            % end+1 es append
+            % end+1 significa "agrega un elemento al final" (append).
             matchedImIdx(end+1) = i; %#ok<AGROW>
-            % maskMap(k) devuelve el índice de la máscara que corresponde a la clave k
             matchedPxIdx(end+1) = maskMap(k); %#ok<AGROW>
         else
             missingList{end+1} = imFiles{i}; %#ok<AGROW>

@@ -1,7 +1,7 @@
 clear; clc;
 
 modelPath    = "unet_modern.mat";
-imagePath    = fullfile("data","polypgen","img","C1_100H0050.jpg");
+imagePath    = fullfile("data","polypgen","img","C1_102OLCV1_100H0006.jpg");
 outputMask   = "prediction_mask.png";
 outputOverlay= "prediction_overlay.png";
 classNames   = ["background","Polyp"];
@@ -43,7 +43,7 @@ catch
     C = categorical(idx-1, [0 1], classNames);  % mapea 1->0(bg), 2->1(Polyp)
 end
 
-% -- Si reescalaste, regresa la máscara al tamaño original --
+% Si se reescalaste regresa la máscara al tamaño original --
 if resized
     maskSmall = (C == classNames(2));
     mask = imresize(maskSmall, size(Iorig,[1 2]), 'nearest');
@@ -55,8 +55,8 @@ end
 imwrite(uint8(mask)*255, outputMask);
 
 % Overlay visual
-cmap    = [0 0 0; polypColor];
-Crow    = categorical(mask,[0 1],classNames);  % asegurar cats para overlay
+cmap = [0 0 0; polypColor];
+Crow = categorical(mask,[0 1],classNames);  % asegurar cats para overlay
 overlay = labeloverlay(Iorig, Crow, 'Colormap', cmap, 'Transparency', 0.6);
 imwrite(overlay, outputOverlay);
 
