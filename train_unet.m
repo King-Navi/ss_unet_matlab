@@ -1,138 +1,110 @@
 function train_unet_modern
-% unet (dlnetwork) + trainnet + loss (Weighted CE + Soft Dice)
-% imgs 256x256 (RGB or grises) y binary masks (Polyp vs background).
-
-%libera toda la memoria de la GPU, cierra el contexto CUDA
-reset(gpuDevice);
-
-imDir   = fullfile("data","polypgen","img");
-maskDir = fullfile("data","polypgen","mask");
-classNames = ["background","Polyp"];   % mantener orden 
-labelIDs   = [0 255];
-
-assert(isfolder(imDir),  "Images folder not found: %s", imDir);
-assert(isfolder(maskDir),"Masks folder not found: %s", maskDir);
-
-%% Datastores (Computer Vision Toolbox) igual que dataloaders
-imds = imageDatastore(imDir, ...
-    'IncludeSubfolders', true, ...
-    'FileExtensions', {'.png','.jpg','.jpeg','.tif','.tiff'});
-
-% ReadFcn sea un handle que reciba un solo argumento (el filename) y devuelva una matriz categórica
-pxds = pixelLabelDatastore(maskDir, classNames, labelIDs, ...
-    'IncludeSubfolders', true, ...
-    'FileExtensions', {'.png','.jpg','.jpeg','.tif','.tiff'}, ...
-    'ReadFcn', @(fn) readMaskAsCategorical(fn, classNames));
-
-%% verificar pares
-[imds, pxds, rep] = alignByBasename(imds, pxds, false);
-fprintf('Kept pairs: %d | Missing masks: %d | Extra masks: %d\n', ...
-    rep.keptPairs, rep.missingMasks, rep.extraMasks);
-if rep.missingMasks > 0
-    disp('Examples without matching mask:'); disp(string(rep.sampleMissing(:)));
-end
-
-totalImages = numel(imds.Files);
-assert(totalImages > 1, "Not enough paired samples.");
-
-%% split: ensure validation has positive cases
-% Semilla fija (reproducible)
-rng(123);
-% F = false(___,like=p) devuelve un arreglo de ceros lógicos de la misma dispersión que la variable lógica p
-hasPolyp = false(totalImages,1);
-%Detectar qué imágenes tienen pólipo
-for i = 1:totalImages
-    % reads the Ith image file from the datastore 
-    L = readimage(pxds, i);
-    % matriz categórica (H×W) con categorías ["background","Polyp"]. L(:) convierte toda la matriz en un vector columna.
-    hasPolyp(i) = any(L(:) == "Polyp");
-end
-
-% find te devuelve los índices
-posIdx = find(hasPolyp);
-% ~ es ! osea NOT
-negIdx = find(~hasPolyp);
-
-valFrac   = 0.30;
-% numel devuelve el número de elementos
-numValPos = max(1, round(valFrac * numel(posIdx)));
-numValNeg = max(1, round(valFrac * numel(negIdx)));
-
-valIdx = [randsample(posIdx, min(numValPos, numel(posIdx)), false); ...
-          randsample(negIdx, min(numValNeg, numel(negIdx)), false)];
-valIdx = unique(valIdx);
-trnIdx = setdiff(1:totalImages, valIdx);
-
-imdsTrain = subset(imds, trnIdx);
-pxdsTrain = subset(pxds, trnIdx);
-imdsVal   = subset(imds, valIdx);
-pxdsVal   = subset(pxds, valIdx);
-
-%% Patch-based training
-
-%une datastores por indice, asegira con preprocessTrainPair que si sea 3
-%canales tipo single
-dsTrainNN = transform(combine(imdsTrain, pxdsTrain), @(d) preprocessTrainPair(d, classNames));
-
-%% Build U-Net (modern API -> dlnetwork)
-imageSize    = [256 256 3];
-numClasses   = numel(classNames);
-encoderDepth = 4;
-
-
-net0 = unet(imageSize, numClasses, 'EncoderDepth', encoderDepth); % dlnetwork
-
-%% Training options
-optNN = trainingOptions("adam", ...
-    "InitialLearnRate", 1e-4, ...
-    "MaxEpochs", 220, ...
-    "MiniBatchSize", 8, ...
-    "ExecutionEnvironment", "auto", ...
-    "VerboseFrequency", 1000);
-
-%% Loss function: Weighted CE + Soft Dice (focus on Polyp)
-classWeights = [1 20];
-lambdaDice   = 1.0;
-
-lossFcn = @(Y,T) lossDiceCE(Y,T,classNames,classWeights,lambdaDice);
-
-%% Train
-net = trainnet(dsTrainNN, net0, lossFcn, optNN);
-
-%% Save
-save("unet_modern.mat","net");
-
-
-
-%% Evaluate (MATLAB metrics)
-try
-    pxdsPred = predictSegDL(imdsVal, net, classNames);
-    metrics  = evaluateSemanticSegmentation(pxdsPred, pxdsVal, 'Verbose', false);
-    disp('Class metrics (MATLAB):'); disp(metrics.ClassMetrics);
-
-    [polyIoU, polyDice, polyPrec, polyRec] = polypOnlyMetrics(pxdsVal, pxdsPred);
-    fprintf('Polyp IoU:  %.4f\n', polyIoU);
-    fprintf('Polyp Dice: %.4f\n', polyDice);
-    fprintf('Polyp Prec: %.4f | Polyp Rec: %.4f\n', polyPrec, polyRec);
-catch ME
-    warning("Evaluation failed: %s", string(ME.message));
-end
-
-%% Polyp-only, background-agnostic metrics (more realistic)
-[polyIoU, polyDice, polyPrec, polyRec, ~] = polypOnlyMetrics(pxdsVal, pxdsPred);
-fprintf('Polyp IoU:  %.4f\n', polyIoU);
-fprintf('Polyp Dice: %.4f\n', polyDice);
-fprintf('Polyp Prec: %.4f | Polyp Rec: %.4f\n', polyPrec, polyRec);
-
-%% Quick visual check
-%I1 = readimage(imdsVal, 1);
-%L1 = readimage(pxdsVal, 1);
-%P1 = readimage(pxdsPred, 1);
-%figure;
-%subplot(1,3,1); imshow(I1); title('Image');
-%subplot(1,3,2); imshow(labeloverlay(I1, L1=='Polyp','Transparency',0.6)); title('GT overlay');
-%subplot(1,3,3); imshow(labeloverlay(I1, P1=='Polyp','Transparency',0.6)); title('Pred overlay');
-
+    % unet (dlnetwork) + trainnet + loss (Weighted CE + Soft Dice)
+    % imgs 256x256 (RGB or grises) y binary masks (Polyp vs background).
+    
+    %libera toda la memoria de la GPU, cierra el contexto CUDA
+    reset(gpuDevice);
+    
+    imDir   = fullfile("data","polypgen","img");
+    maskDir = fullfile("data","polypgen","mask");
+    classNames = ["background","Polyp"];   % mantener orden 
+    labelIDs   = [0 255];
+    
+    assert(isfolder(imDir),  "Images folder not found: %s", imDir);
+    assert(isfolder(maskDir),"Masks folder not found: %s", maskDir);
+    
+    %% Datastores (Computer Vision Toolbox) igual que dataloaders
+    imds = imageDatastore(imDir, ...
+        'IncludeSubfolders', true, ...
+        'FileExtensions', {'.png','.jpg','.jpeg','.tif','.tiff'});
+    
+    % ReadFcn sea un handle que reciba un solo argumento (el filename) y devuelva una matriz categórica
+    pxds = pixelLabelDatastore(maskDir, classNames, labelIDs, ...
+        'IncludeSubfolders', true, ...
+        'FileExtensions', {'.png','.jpg','.jpeg','.tif','.tiff'}, ...
+        'ReadFcn', @(fn) readMaskAsCategorical(fn, classNames));
+    
+    %% verificar pares
+    [imds, pxds, rep] = alignByBasename(imds, pxds, false);
+    fprintf('Kept pairs: %d | Missing masks: %d | Extra masks: %d\n', ...
+        rep.keptPairs, rep.missingMasks, rep.extraMasks);
+    if rep.missingMasks > 0
+        disp('Examples without matching mask:'); disp(string(rep.sampleMissing(:)));
+    end
+     
+    totalImages = numel(imds.Files);
+    assert(totalImages > 1, "Not enough paired samples.");
+    
+    %% split: ensure validation has positive cases
+    % Semilla fija (reproducible)
+    % rng(123);
+    % rng(345);
+    % rng(567);
+    % rng(789);
+    rng(911);
+    % F = false(___,like=p) devuelve un arreglo de ceros lógicos de la misma dispersión que la variable lógica p
+    hasPolyp = false(totalImages,1);
+    %Detectar qué imágenes tienen pólipo
+    for i = 1:totalImages
+        % reads the Ith image file from the datastore 
+        L = readimage(pxds, i);
+        % matriz categórica (H×W) con categorías ["background","Polyp"]. L(:) convierte toda la matriz en un vector columna.
+        hasPolyp(i) = any(L(:) == "Polyp");
+    end
+    
+    % find te devuelve los índices
+    posIdx = find(hasPolyp);
+    % ~ es ! osea NOT
+    negIdx = find(~hasPolyp);
+    
+    valFrac   = 0.30;
+    % numel devuelve el número de elementos
+    numValPos = max(1, round(valFrac * numel(posIdx)));
+    numValNeg = max(1, round(valFrac * numel(negIdx)));
+    
+    valIdx = [randsample(posIdx, min(numValPos, numel(posIdx)), false); ...
+              randsample(negIdx, min(numValNeg, numel(negIdx)), false)];
+    valIdx = unique(valIdx);
+    trnIdx = setdiff(1:totalImages, valIdx);
+    
+    imdsTrain = subset(imds, trnIdx);
+    pxdsTrain = subset(pxds, trnIdx);
+    imdsVal   = subset(imds, valIdx);
+    pxdsVal   = subset(pxds, valIdx);
+    
+    %% Patch-based training
+    
+    %une datastores por indice, asegira con preprocessTrainPair que si sea 3
+    %canales tipo single
+    dsTrainNN = transform(combine(imdsTrain, pxdsTrain), @(d) preprocessTrainPair(d, classNames));
+    
+    %% Build U-Net (modern API -> dlnetwork)
+    imageSize    = [256 256 3];
+    numClasses   = numel(classNames);
+    encoderDepth = 4;
+    
+    
+    net0 = unet(imageSize, numClasses, 'EncoderDepth', encoderDepth); % dlnetwork
+    
+    %% Training options
+    optNN = trainingOptions("adam", ...
+        "InitialLearnRate", 1e-4, ...
+        "MaxEpochs", 220, ...
+        "MiniBatchSize", 22, ...
+        "ExecutionEnvironment", "auto", ...
+        "VerboseFrequency", 1000);
+    
+    %% Loss function: Weighted CE + Soft Dice (focus on Polyp)
+    classWeights = [1 20];
+    lambdaDice   = 1.0;
+    
+    lossFcn = @(Y,T) lossDiceCE(Y,T,classNames,classWeights,lambdaDice);
+    
+    %% Train
+    net = trainnet(dsTrainNN, net0, lossFcn, optNN);
+    
+    %% Save
+    save("unet_modern_5.mat","net");
 end
 
 %%
@@ -229,29 +201,7 @@ function k = normKey(pathStr)
     k = name;
 end
 
-% predicciones sobre tu conjunto de validación y te devuelve un pixelLabelDatastore con las máscaras predichas
-function pxdsPred = predictSegDL(imdsVal, net, classNames)
-    % Manual predictor for dlnetwork -> pixelLabelDatastore of predictions.
-    outDir = tempname; mkdir(outDir);
-    predFiles = strings(numel(imdsVal.Files),1);
-    
-    for i=1:numel(imdsVal.Files)
-        I = readimage(imdsVal,i);
-        % garantiza 3 canales
-        if size(I,3)==1, I = repmat(I,1,1,3); end
-        X = dlarray(single(I)/255, 'SSCB'); % escala a [0,1] y etiqueta dims (S,S,C,B) Spatial, Spatial, Channel, Batch (aquí batch N=1).
-        Y = predict(net, X); % salida: probabilidades (softmax) HxWxCx1
-        Y = extractdata(Y); % dlarray/GPU a arreglo normal
-        [~,idx] = max(Y, [], 3); % argmax sobre la dimensión de clases
-        L = categorical(idx-1, [0 1], classNames); % mapea 0 bg, 1 Polyp (orden [bg,Polyp])
-        % Escribe a disco
-        imwrite(uint8(L=="Polyp")*255, fullfile(outDir, sprintf('pred_%05d.png',i)));
-        predFiles(i) = fullfile(outDir, sprintf('pred_%05d.png',i));
-    end
-    
-    pxdsPred = pixelLabelDatastore(predFiles, classNames, [0 255], ...
-        'ReadFcn', @(fn) readMaskAsCategorical(fn, classNames));
-end
+
 
 
 % Y: HxWxCxN probabilidades (salida softmax de la U-Net)
@@ -303,38 +253,6 @@ function Y = clampProb(Y, eps)
 Y = min(max(Y, eps), 1-eps);
 end
 
-% parametros ambos datastores
-function [miou, dice, prec, rec, cm] = polypOnlyMetrics(pxdsGT, pxdsPR)
-    % Ignora backgrouind
-    % Accumulators across all images (flattened pixel-wise)
-    % ground truth all píxeles de la verdad de terreno (GT) aplanados y concatenados.
-    % prediction all píxeles de la predicción (PR) aplanados y concatenados.
-    gtAll = []; prAll = [];
-    numImages = numel(pxdsGT.Files);
-    for i=1:numImages
-        GT = readimage(pxdsGT, i) == "Polyp";
-        PR = readimage(pxdsPR, i) == "Polyp";
-        gtAll = [gtAll; GT(:)]; %#ok<AGROW>
-        prAll = [prAll; PR(:)]; %#ok<AGROW>
-    end
-    % gtAll(p) = 1 si el píxel p es Polyp en la verdad (GT), si no 0
-    % prAll(p) = 1 si el píxel p fue predicho como Polyp, si no 0.
-    % Confusion components for the Polyp class
-    TP = sum(gtAll & prAll);
-    FP = sum(~gtAll & prAll);
-    FN = sum(gtAll & ~prAll);
-    % IoU (Jaccard) for Polyp
-    denIoU = TP + FP + FN;
-    miou = (denIoU>0) * (TP / max(denIoU,1));
-
-    % Dice for Polyp
-    dice = (TP>0 || (FP+FN)>0) * (2*TP / max(2*TP + FP + FN, 1));
-    
-    % Precision & Recall for Polyp
-    prec = TP / max(TP+FP, 1);
-    rec  = TP / max(TP+FN, 1);
-    cm = [TP FP; FN 0]; %#ok<NASGU>
-end
 
 
 % toma un par {imagen, máscara} y convierte a 3 canales tipo single valores [0,1].

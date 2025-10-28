@@ -12,6 +12,7 @@ polypColor   = [1 0 0];    % rojo overlay
 S = load(modelPath);
 net = S.net;
 
+% Canales 3 asegurarse
 Iorig = imread(imagePath);
 if size(Iorig,3)==1
     I3 = repmat(Iorig,1,1,3);
@@ -19,6 +20,7 @@ else
     I3 = Iorig;
 end
 
+% reescalaste
 resized = false;
 if any(size(I3,1:2) ~= targetSize)
     Iin = imresize(I3, targetSize, "nearest");
@@ -27,17 +29,23 @@ else
     Iin = I3;
 end
 
-% -------- Try semanticseg, fallback a predictor manual --------
+
 try
-    C = semanticseg(Iin, net, 'ExecutionEnvironment','auto');   % puede funcionar con dlnetwork en versiones recientes
+    % puede funcionar con dlnetwork en versiones recientes
+
+    % 'ExecutionEnvironment','auto': usa GPU si hay disponible; si no, CPU.
+    C = semanticseg(Iin, net, 'ExecutionEnvironment','auto');   
     % Fuerza categorías y orden, por si semanticseg devuelve solo 1 clase:
+    % categories(C): lista de categorías presentes en el categórico resultante C
     miss = setdiff(classNames, categories(C));
+    % addcats: agrega las categorías faltantes a C para que siempre tenga las mismas categorías globales (aunque alguna no aparezca en esa imagen).
     if ~isempty(miss), C = addcats(C, miss); end
+    % reordercats: reordena las categorías de C para que queden exactamente en el orden classNames
     C = reordercats(C, classNames);
 catch
     % Predictor manual (dlnetwork): predict -> argmax -> categorical con mismas categorías
-    X = dlarray(im2single(Iin), 'SSCB');   % HxWxCx1, single [0..1]
-    Y = predict(net, X);                   % HxWxCx1 (probabilidades softmax)
+    X = dlarray(im2single(Iin), 'SSCB');% HxWxCx1, single [0..1]
+    Y = predict(net, X);% HxWxCx1 (probabilidades softmax)
     Y = extractdata(Y);
     [~,idx] = max(Y,[],3);                 % 1=bg, 2=Polyp
     C = categorical(idx-1, [0 1], classNames);  % mapea 1->0(bg), 2->1(Polyp)
@@ -116,14 +124,15 @@ if hasGT
         'Colormap', [0 0 0; 0 1 0; 1 0 0; 0 0 1], 'Transparency', 0.55);
     imwrite(diffOverlay, "prediction_diff_overlay.png");
 
-    % Optional figure pane
+    % figure pane
     figure;
+    % subplot(2,2,2): crea/selecciona el panel #2 de una grilla de 2 filas × 2 columnas (orden por filas: 1=arriba-izq, 2=arriba-der, 3=abajo-izq, 4=abajo-der).
     subplot(2,2,1); imshow(Iorig); title('Original');
     subplot(2,2,2); imshow(GT);    title('GT Mask');
     subplot(2,2,3); imshow(P);     title('Predicted Mask');
     subplot(2,2,4); imshow(diffOverlay); title('Diff: TP(g) FP(r) FN(b)');
 else
-    % No GT available: print simple sanity stats on prediction
+    % No GT available
     pix = numel(P);
     polypPix = nnz(P);
     areaFrac = polypPix / pix;
