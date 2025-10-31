@@ -37,11 +37,15 @@ function train_unet_modern
     
     %% split: ensure validation has positive cases
     % Semilla fija (reproducible)
-    % rng(123);
-    % rng(345);
-    % rng(567);
-    % rng(789);
-    rng(911);
+    % rng(123); 1
+    % rng(345); 2
+    % rng(567); 3
+    % rng(789); 4
+    % rng(911); 5
+    % rng(9991);6
+    % rng(6969);7
+    % rng(8989);8
+    rng(999999);
     % F = false(___,like=p) devuelve un arreglo de ceros lógicos de la misma dispersión que la variable lógica p
     hasPolyp = false(totalImages,1);
     %Detectar qué imágenes tienen pólipo
@@ -104,7 +108,7 @@ function train_unet_modern
     net = trainnet(dsTrainNN, net0, lossFcn, optNN);
     
     %% Save
-    save("unet_modern_5.mat","net");
+    save("unet_modern_9.mat","net");
 end
 
 %%
